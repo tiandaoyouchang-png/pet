@@ -3,6 +3,11 @@
 """Render the current UI implementation to PNGs without image generation."""
 from pathlib import Path
 import os
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -11,9 +16,10 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication
 
 import pixar_pet as core
-from momo_app import ApplePetWindow, PreferencesDialog, StatusCard
+from momo_app import ApplePetWindow
+from momo_ui import PreferencesDialog, StatusCard, ui_font
 
-OUT = Path("artifacts/ui-preview")
+OUT = ROOT / "artifacts" / "ui-preview"
 OUT.mkdir(parents=True, exist_ok=True)
 
 
@@ -22,7 +28,8 @@ def grab(widget, filename):
     app.processEvents()
     pix = widget.grab()
     path = OUT / filename
-    pix.save(str(path))
+    if not pix.save(str(path)):
+        raise RuntimeError("Failed to save {}".format(path))
     return pix
 
 
@@ -32,6 +39,7 @@ app.setQuitOnLastWindowClosed(False)
 
 pet = ApplePetWindow(app)
 pet.timer.stop()
+pet.ui_state["hud_mode"] = "always"
 pet.bubble.show("嗨！我是 Momo～", 60.0)
 pet.character.enter_mode("idle", 60.0)
 pet.needs.update({"mood": 0.82, "hunger": 0.71, "energy": 0.86, "social": 0.77})
@@ -44,10 +52,9 @@ status_pix = grab(status, "02-status-card.png")
 prefs = PreferencesDialog(pet)
 prefs_pix = grab(prefs, "03-preferences.png")
 
-menu = pet._build_menu()
+menu = pet.tray_menu
 menu_pix = grab(menu, "04-menu.png")
 
-# Compose a neutral contact sheet from the actual grabs.
 margin = 36
 header = 92
 col_gap = 30
@@ -62,15 +69,10 @@ canvas.fill(QColor(244, 244, 247))
 
 p = QPainter(canvas)
 p.setRenderHint(QPainter.Antialiasing)
-font = QFont("PingFang SC")
-font.setPixelSize(28)
-font.setWeight(QFont.DemiBold)
-p.setFont(font)
+p.setFont(ui_font(28, QFont.DemiBold))
 p.setPen(QColor(29, 29, 31))
 p.drawText(margin, 48, "Momo 当前代码真实渲染")
-font.setPixelSize(14)
-font.setWeight(QFont.Normal)
-p.setFont(font)
+p.setFont(ui_font(14, QFont.Normal))
 p.setPen(QColor(110, 110, 115))
 p.drawText(margin, 74, "ui/apple-polish · Qt widget.grab() · 非 AI 概念图")
 
@@ -84,13 +86,14 @@ p.drawPixmap(x1, y2, prefs_pix)
 p.drawPixmap(x2, y2, menu_pix)
 p.end()
 
-canvas.save(str(OUT / "00-current-state-contact-sheet.png"))
+if not canvas.save(str(OUT / "00-current-state-contact-sheet.png")):
+    raise RuntimeError("Failed to save contact sheet")
+
 print("Rendered:")
 for item in sorted(OUT.glob("*.png")):
-    print(item)
+    print(item.relative_to(ROOT))
 
 status.close()
 prefs.close()
-menu.close()
 pet.close()
 app.quit()
