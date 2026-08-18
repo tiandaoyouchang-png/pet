@@ -8,4 +8,4 @@ if [ ! -x ".venv/bin/python" ]; then
 fi
 echo "正在检查依赖..."
 .venv/bin/pip install -q -r requirements.txt
-exec .venv/bin/python pixar_pet.py
+exec .venv/bin/python momo_app.py
