@@ -1,22 +1,35 @@
 # Momo 桌宠 🍊
 
-一个 Pixar 动画风格的 macOS 桌面宠物：圆滚滚的小橘子怪兽 **Momo**。
-它会像真的小家伙一样自己溜达、发呆、打盹、跳舞、要吃的，也会追着你的鼠标看。
+一个轻量、低打扰的 macOS 桌面宠物。Momo 会自己溜达、发呆、打盹、跳舞、要吃的，也会追着你的鼠标看。
+
+当前 `ui/apple-polish` 版本保留原来的鸡蛋形象与 60 FPS 动画核心，同时加入了更完整的 Apple/macOS 风格 UI。
 
 ![Momo](docs/preview.png)
 
 ## 快速开始
 
-双击 `start.command`（首次会自动创建虚拟环境并安装 PySide6 + pyobjc）。
+双击 `start.command`。首次运行会自动创建虚拟环境并安装 PySide6 + pyobjc。
 
-或者在终端里运行：
+也可以在终端运行：
 
 ```bash
 cd 本目录
 python3 -m venv .venv
 ./.venv/bin/pip install -r requirements.txt
-./.venv/bin/python pixar_pet.py
+./.venv/bin/python momo_app.py
 ```
+
+## 现在有哪些 UI 改进
+
+- 更轻的半透明对话气泡
+- 头顶心情 HUD 胶囊
+- Apple 风格右键 / 菜单栏菜单
+- 点击菜单栏图标打开状态卡
+- 状态卡显示心情、饱食、精力和当前行为
+- 喂食、玩耍、跳舞、睡觉快捷操作
+- 显示 / 隐藏 Momo、召回到当前屏幕
+- 偏好设置：浅色 / 深色 / 跟随系统、透明度、气泡时长、气泡开关、HUD 开关
+- UI 配置会与需求状态一起保存到 `~/.momo_pet.json`
 
 ## 怎么和 Momo 玩
 
@@ -25,46 +38,48 @@ python3 -m venv .venv
 | 单击 | 被戳一下：惊讶、脸红、冒小心心 |
 | 双击 | 击掌 + 即兴跳舞 |
 | 按住不动 | 抚摸：舒服得冒爱心，心情和亲密度上升 |
-| 按住拖动 | 把它拎起来；松手后弹跳落地，扬起灰尘 |
-| 鼠标悬停 | 它会一直盯着你的光标看，看久了会挥手打招呼 |
-| 滚轮 | 挠痒痒：咯咯笑 |
-| 右键 / 托盘右键 | 喂饼干、扔皮球、跳舞、睡觉/叫醒、退出（Momo 永远浮在最上层） |
-| 点击托盘图标 | 打招呼（睡着时会被叫醒） |
+| 按住拖动 | 把它拎起来；松手后弹跳落地 |
+| 鼠标悬停 | 它会盯着光标看，看久了会挥手 |
+| 滚轮 | 挠痒痒 |
+| 右键 Momo | 打开完整快捷菜单 |
+| 点击菜单栏图标 | 打开 Momo 状态卡 |
 
-## 自主行为（像真人一样有需求）
+## 自主行为
 
-Momo 有四个隐形需求：**饱腹、精力、亲密度、心情**，会随时间变化：
+Momo 有四个需求：**饱腹、精力、亲密度、心情**，会随时间变化。
 
-- 🍪 饿了会主动说“肚子咕咕叫”，心情变差 → 右键喂小饼干
-- 😴 累了或深夜会自己睡着，睡饱了会醒来；睡着会冒 Zzz
-- 🥺 太久没人理会主动招手求关注
-- 😄 心情好会自己唱歌、跳舞、散步、发呆、伸懒腰、打哈欠
-- 🚶 会沿屏幕底边自己“溜达”，还会东张西望、眨眼、盯着鼠标
-
-需求与窗口位置会保存在 `~/.momo_pet.json`。
+- 🍪 饿了会主动提醒你
+- 😴 累了或深夜会自己睡觉
+- 🥺 太久没人理会会主动求关注
+- 😄 心情好会唱歌、跳舞、散步、发呆、伸懒腰
+- 🚶 会沿屏幕底边自己溜达
 
 ## 文件说明
 
-```
-pixar_pet.py      主程序（无外部资源，角色全部用 Qt 矢量绘制）
-requirements.txt  依赖
-start.command     macOS 双击启动脚本
-make_preview.py   生成各状态的预览图（可选）
-docs/preview.png  预览图
+```text
+pixar_pet.py                角色动画、行为、需求系统与原生置顶逻辑
+momo_app.py                 Apple 风格 App / 菜单 / HUD 协调层
+momo_ui.py                  状态卡、偏好设置、主题 token 等 UI 组件
+requirements.txt            依赖
+start.command               macOS 双击启动入口
+tools/render_actual_preview.py  使用 Qt widget.grab() 生成真实 UI 预览
+make_preview.py             角色状态预览辅助脚本
+docs/preview.png            角色预览图
 ```
 
 ## 常见问题
 
-- **没有安装依赖**：双击 `start.command`，它会自动创建虚拟环境并安装依赖。
-- **桌宠不见了**：它可能溜达到屏幕另一边，或者在菜单栏托盘里点一下图标。
-- **退出**：右键 Momo 或托盘图标 → 退出。
-- **它永远在最上层**：Qt 置顶 + macOS 原生 `NSFloatingWindowLevel` 双重保证，跨 Space、全屏 App 之上都会显示。这是设计如此，不提供取消置顶。
-- **不会抢焦点**：窗口是 `NonactivatingPanel`，App 运行在 Accessory 模式（不占 Dock、不出现在 Cmd-Tab），点击、拖动 Momo 都不会打断你正在用的软件。
+- **没有安装依赖**：双击 `start.command`，会自动安装。
+- **桌宠不见了**：点击菜单栏 Momo 图标，或菜单里选择“召回到当前屏幕”。
+- **不想它挡住画面**：菜单或状态卡里选择“隐藏 Momo”，再次点击菜单栏图标即可召回。
+- **退出**：右键 Momo 或菜单栏菜单 → “退出 Momo”。
+- **始终置顶**：Qt 置顶 + macOS `NSFloatingWindowLevel`，可跨 Space / 全屏显示。
+- **不会抢焦点**：Momo 使用 NonactivatingPanel，App 运行在 Accessory 模式，不占 Dock、不进 Cmd-Tab。
 
-## 技术小抄
+## 技术说明
 
-- 60 FPS 角色动画：眨眼、呼吸、挤压与拉伸（squash & stretch）、预备动作
-- 全矢量 QPainter 渲染：多层径向渐变 + 柔光 + 环境光反射 + 眼睑/虹膜/高光细节，Pixar 大眼风格
-- 无边框透明窗口 + QPropertyAnimation 窗口移动
-- 置顶：Qt `WindowStaysOnTopHint` + macOS 原生 `NSFloatingWindowLevel`、`CanJoinAllSpaces`、`FullScreenAuxiliary`
-- 简单状态机 + 需求系统驱动自主行为
+- PySide6 / QPainter 全矢量绘制
+- 60 FPS 角色动画
+- UI 与角色行为分层：`pixar_pet.py` 保持核心稳定，UI 由 `momo_app.py` + `momo_ui.py` 扩展
+- Qt `WindowStaysOnTopHint` + macOS AppKit 原生窗口层级
+- 状态与 UI 偏好持久化
