@@ -2,9 +2,13 @@
 # -*- coding: utf-8 -*-
 """Apple/macOS presentation layer for Momo Desktop Pet."""
 import sys
+import time
 
 from PySide6.QtCore import QRectF, QTimer, Qt
-from PySide6.QtGui import QAction, QCursor, QFont, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen, QPixmap
+from PySide6.QtGui import (
+    QAction, QColor, QCursor, QFont, QIcon, QLinearGradient, QPainter,
+    QPainterPath, QPalette, QPen, QPixmap,
+)
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 import pixar_pet as core
@@ -68,14 +72,18 @@ class ApplePetWindow(core.PetWindow):
         self.preferences = None
         self.tray_menu = None
         self.pet_hidden = False
+        self.hud_visible_until = time.monotonic() + 5.0
         super().__init__(app)
         self.bubble = AppleSpeechBubble(self)
+        self._connect_system_appearance()
         self.apply_ui_state(save=False)
         self.bubble.show(core.say("start"), 3.6)
+        self.reveal_hud(5.0)
         self.ui_timer = QTimer(self)
         self.ui_timer.timeout.connect(self.update_dynamic_ui)
         self.ui_timer.start(1200)
 
+    # ---------- persistence ----------
     def load_state(self):
         super().load_state()
         try:
@@ -86,6 +94,9 @@ class ApplePetWindow(core.PetWindow):
                 for key in DEFAULT_UI:
                     if key in saved_ui:
                         self.ui_state[key] = saved_ui[key]
+                # Migration from the first Apple UI prototype.
+                if "hud_mode" not in saved_ui and "hud_enabled" in saved_ui:
+                    self.ui_state["hud_mode"] = "smart" if saved_ui.get("hud_enabled") else "off"
         except Exception:
             pass
 
@@ -99,12 +110,35 @@ class ApplePetWindow(core.PetWindow):
         except Exception:
             pass
 
+    # ---------- theme ----------
+    def _connect_system_appearance(self):
+        try:
+            signal = getattr(self.app.styleHints(), "colorSchemeChanged", None)
+            if signal is not None:
+                signal.connect(self._on_system_appearance_changed)
+        except Exception:
+            pass
+
+    def _on_system_appearance_changed(self, *args):
+        if self.ui_state.get("theme_mode") == "system":
+            self.apply_ui_state(save=False)
+
     def effective_theme_name(self):
         mode = self.ui_state.get("theme_mode", "system")
         if mode == "dark":
             return "深色"
         if mode == "light":
             return "浅色"
+        try:
+            scheme_fn = getattr(self.app.styleHints(), "colorScheme", None)
+            if scheme_fn is not None:
+                scheme = scheme_fn()
+                if scheme == Qt.ColorScheme.Dark:
+                    return "深色"
+                if scheme == Qt.ColorScheme.Light:
+                    return "浅色"
+        except Exception:
+            pass
         try:
             return "深色" if self.app.palette().color(QPalette.Window).lightness() < 128 else "浅色"
         except Exception:
@@ -121,10 +155,13 @@ class ApplePetWindow(core.PetWindow):
     def apply_ui_state(self, save=True):
         opacity = max(0.70, min(1.0, float(self.ui_state.get("opacity", 0.98))))
         self.ui_state["opacity"] = opacity
+        if self.ui_state.get("hud_mode") not in ("smart", "always", "off"):
+            self.ui_state["hud_mode"] = "smart"
         self.setWindowOpacity(opacity)
         if not self.ui_state.get("speech_enabled", True):
             self.bubble.t = -1.0
-        self._rebuild_tray_menu()
+        self._apply_menu_style()
+        self._refresh_menu_actions()
         self.refresh_tray_icon()
         self.refresh_tray_tooltip()
         if self.status_card is not None:
@@ -135,6 +172,7 @@ class ApplePetWindow(core.PetWindow):
         if save:
             self.save_state()
 
+    # ---------- tray icon ----------
     def make_avatar_pixmap(self, width=80, height=96):
         pix = QPixmap(width, height)
         pix.fill(Qt.transparent)
@@ -146,8 +184,37 @@ class ApplePetWindow(core.PetWindow):
         painter.end()
         return pix
 
+    def make_template_tray_icon(self):
+        """Minimal egg silhouette; marked as a mask so macOS adapts it to the menu bar."""
+        pix = QPixmap(44, 44)
+        pix.fill(Qt.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.Antialiasing)
+        egg = QPainterPath()
+        egg.moveTo(22, 5)
+        egg.cubicTo(13, 5, 7, 16, 8, 27)
+        egg.cubicTo(9, 36, 14, 40, 22, 40)
+        egg.cubicTo(30, 40, 35, 36, 36, 27)
+        egg.cubicTo(37, 16, 31, 5, 22, 5)
+        egg.closeSubpath()
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(0, 0, 0))
+        p.drawPath(egg)
+        p.setCompositionMode(QPainter.CompositionMode_Clear)
+        p.drawEllipse(QRectF(15, 19, 4, 6))
+        p.drawEllipse(QRectF(25, 19, 4, 6))
+        p.end()
+        pix.setDevicePixelRatio(2.0)
+        icon = QIcon(pix)
+        icon.setIsMask(True)
+        return icon
+
     def refresh_tray_icon(self):
-        if hasattr(self, "tray"):
+        if not hasattr(self, "tray"):
+            return
+        if sys.platform == "darwin":
+            self.tray.setIcon(self.make_template_tray_icon())
+        else:
             self.tray.setIcon(QIcon(self.make_avatar_pixmap(48, 56)))
 
     def refresh_tray_tooltip(self):
@@ -161,8 +228,23 @@ class ApplePetWindow(core.PetWindow):
         mode = MODE_LABELS.get(self.character.mode, "陪伴中")
         self.tray.setToolTip("Momo · {} · 心情 {} · 饱食 {}".format(mode, mood, hunger))
 
+    # ---------- HUD ----------
+    def reveal_hud(self, seconds=4.0):
+        if self.ui_state.get("hud_mode", "smart") == "off":
+            return
+        self.hud_visible_until = max(self.hud_visible_until, time.monotonic() + seconds)
+        self.update()
+
+    def should_draw_hud(self):
+        mode = self.ui_state.get("hud_mode", "smart")
+        if mode == "off":
+            return False
+        if mode == "always":
+            return True
+        return time.monotonic() < self.hud_visible_until
+
+    # ---------- dynamic UI ----------
     def update_dynamic_ui(self):
-        self.refresh_tray_icon()
         self.refresh_tray_tooltip()
         if self.status_card is not None and self.status_card.isVisible():
             self.status_card.refresh()
@@ -175,7 +257,8 @@ class ApplePetWindow(core.PetWindow):
         self.move_to_floor(animate=False)
         self._assert_always_on_top()
         self.bubble.show("我回来啦～", 2.1)
-        self._rebuild_tray_menu()
+        self.reveal_hud(4.0)
+        self._refresh_menu_actions()
         self.update_dynamic_ui()
         self.save_state()
 
@@ -190,18 +273,25 @@ class ApplePetWindow(core.PetWindow):
             self.move_to_floor(animate=False)
             self._assert_always_on_top()
             self.bubble.show("我在这里哦～", 2.1)
-        self._rebuild_tray_menu()
+            self.reveal_hud(4.0)
+        self._refresh_menu_actions()
         self.update_dynamic_ui()
         self.save_state()
 
+    # ---------- native-looking menu ----------
     def setup_tray(self):
-        self.tray = QSystemTrayIcon(QIcon(self.make_avatar_pixmap()), self)
-        self._rebuild_tray_menu()
+        self.tray = QSystemTrayIcon(self)
+        self.tray_menu = self._build_menu()
+        self.tray.setContextMenu(self.tray_menu)
         self.tray.activated.connect(self._on_apple_tray)
+        self.refresh_tray_icon()
         self.refresh_tray_tooltip()
         self.tray.show()
 
     def _menu_style(self):
+        if sys.platform == "darwin":
+            # Let Cocoa/Qt use the platform menu appearance instead of overriding it with QSS.
+            return ""
         colors = self.current_colors()
         return """
             QMenu {{ background:{}; border:1px solid {}; border-radius:14px; padding:6px; color:{}; font-size:13px; }}
@@ -210,67 +300,94 @@ class ApplePetWindow(core.PetWindow):
             QMenu::separator {{ height:1px; background:{}; margin:6px 8px; }}
         """.format(css(colors["surface"]), css(colors["border"]), css(colors["text"]), css(colors["menu_hover"]), css(colors["hairline"]))
 
+    def _apply_menu_style(self):
+        if self.tray_menu is not None:
+            self.tray_menu.setStyleSheet(self._menu_style())
+
     def _build_menu(self):
         menu = QMenu(self)
         menu.setStyleSheet(self._menu_style())
         menu.setAttribute(Qt.WA_ShowWithoutActivating, True)
-        status = QAction("Momo 状态", self)
-        status.triggered.connect(self.show_status_card)
-        menu.addAction(status)
-        visibility = QAction("显示 Momo" if self.pet_hidden else "隐藏 Momo", self)
-        visibility.triggered.connect(self.toggle_visibility)
-        menu.addAction(visibility)
-        recall = QAction("召回到当前屏幕", self)
-        recall.triggered.connect(self.recall_to_cursor_screen)
-        menu.addAction(recall)
+
+        self.action_status = QAction("Momo 状态", self)
+        self.action_status.triggered.connect(self.show_status_card)
+        self.action_visibility = QAction("隐藏 Momo", self)
+        self.action_visibility.triggered.connect(self.toggle_visibility)
+        self.action_recall = QAction("召回到当前屏幕", self)
+        self.action_recall.triggered.connect(self.recall_to_cursor_screen)
+        menu.addAction(self.action_status)
+        menu.addAction(self.action_visibility)
+        menu.addAction(self.action_recall)
         menu.addSeparator()
-        feed = QAction("🍪  喂小饼干", self)
-        ball = QAction("🎮  扔皮球", self)
-        dance = QAction("💃  跳支舞", self)
-        sleep = QAction("🌙  叫醒 Momo" if self.character.mode == "sleep" else "🌙  让 Momo 睡觉", self)
-        feed.triggered.connect(self.feed)
-        ball.triggered.connect(self.play_ball)
-        dance.triggered.connect(self.dance)
-        sleep.triggered.connect(self.toggle_sleep)
-        for action in (feed, ball, dance, sleep):
+
+        self.action_feed = QAction("喂小饼干", self)
+        self.action_ball = QAction("扔皮球", self)
+        self.action_dance = QAction("跳支舞", self)
+        self.action_sleep = QAction("让 Momo 睡觉", self)
+        self.action_feed.triggered.connect(self.feed)
+        self.action_ball.triggered.connect(self.play_ball)
+        self.action_dance.triggered.connect(self.dance)
+        self.action_sleep.triggered.connect(self.toggle_sleep)
+        for action in (self.action_feed, self.action_ball, self.action_dance, self.action_sleep):
             menu.addAction(action)
         menu.addSeparator()
-        preferences = QAction("偏好设置…", self)
-        preferences.triggered.connect(self.show_preferences)
-        menu.addAction(preferences)
-        about = QAction("关于 Momo", self)
-        about.triggered.connect(self.show_about)
-        menu.addAction(about)
+
+        self.action_preferences = QAction("偏好设置…", self)
+        self.action_preferences.triggered.connect(self.show_preferences)
+        self.action_about = QAction("关于 Momo", self)
+        self.action_about.triggered.connect(self.show_about)
+        menu.addAction(self.action_preferences)
+        menu.addAction(self.action_about)
         menu.addSeparator()
-        quit_action = QAction("退出 Momo", self)
-        quit_action.triggered.connect(self.quit)
-        menu.addAction(quit_action)
+        self.action_quit = QAction("退出 Momo", self)
+        self.action_quit.triggered.connect(self.quit)
+        menu.addAction(self.action_quit)
+        menu.aboutToShow.connect(self._refresh_menu_actions)
         return menu
 
-    def _rebuild_tray_menu(self):
-        if hasattr(self, "tray"):
-            self.tray_menu = self._build_menu()
-            self.tray.setContextMenu(self.tray_menu)
+    def _refresh_menu_actions(self):
+        if self.tray_menu is None:
+            return
+        self.action_visibility.setText("显示 Momo" if self.pet_hidden else "隐藏 Momo")
+        self.action_sleep.setText("叫醒 Momo" if self.character.mode == "sleep" else "让 Momo 睡觉")
+        self.action_recall.setEnabled(True)
 
     def _on_apple_tray(self, reason):
-        if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            if self.pet_hidden:
-                self.recall_to_cursor_screen()
+        if reason != QSystemTrayIcon.ActivationReason.Trigger:
+            return
+        if self.pet_hidden:
+            self.recall_to_cursor_screen()
+        if self.status_card is not None and self.status_card.isVisible():
+            self.status_card.hide()
+        else:
             self.show_status_card()
 
     def show_context_menu(self, global_pos):
-        menu = self._build_menu()
-        menu.exec(global_pos)
+        self._refresh_menu_actions()
+        self.tray_menu.exec(global_pos)
+
+    # ---------- popover / preferences ----------
+    def _status_anchor(self):
+        try:
+            geometry = self.tray.geometry()
+            if geometry.isValid() and not geometry.isEmpty():
+                return geometry.center(), geometry
+        except Exception:
+            pass
+        cursor = QCursor.pos()
+        return cursor, QRectF(cursor.x(), cursor.y(), 1, 1).toRect()
 
     def show_status_card(self):
         if self.status_card is None:
             self.status_card = StatusCard(self)
         self.status_card.refresh()
-        cursor = QCursor.pos()
-        screen = self.app.screenAt(cursor) or self.app.primaryScreen()
+        anchor, tray_rect = self._status_anchor()
+        screen = self.app.screenAt(anchor) or self.app.primaryScreen()
         area = screen.availableGeometry()
-        x = cursor.x() - self.status_card.width() // 2
-        y = cursor.y() + 12
+        x = anchor.x() - self.status_card.width() // 2
+        below = tray_rect.bottom() + 8
+        above = tray_rect.top() - self.status_card.height() - 8
+        y = below if below + self.status_card.height() <= area.bottom() else above
         x = max(area.left() + 8, min(x, area.right() - self.status_card.width() - 8))
         y = max(area.top() + 8, min(y, area.bottom() - self.status_card.height() - 8))
         self.status_card.move(x, y)
@@ -278,6 +395,8 @@ class ApplePetWindow(core.PetWindow):
         self.status_card.raise_()
 
     def show_preferences(self):
+        if self.status_card is not None:
+            self.status_card.hide()
         if self.preferences is None:
             self.preferences = PreferencesDialog(self)
         self.preferences.sync_from_pet()
@@ -286,37 +405,56 @@ class ApplePetWindow(core.PetWindow):
         self.preferences.activateWindow()
 
     def show_about(self):
-        QMessageBox.information(self, "关于 Momo", "Momo Desktop Pet\n\n保留鸡蛋形象与 60 FPS 行为动画，\nUI 按 Apple/macOS 的轻透、克制和低打扰方向重新设计。")
+        QMessageBox.information(
+            self, "关于 Momo",
+            "Momo Desktop Pet\n\n保留鸡蛋形象与 60 FPS 行为动画，\nUI 按 Apple/macOS 的轻透、克制和低打扰方向重新设计。",
+        )
 
+    # ---------- interaction hooks ----------
     def feed(self):
         super().feed()
+        self.reveal_hud(4.5)
         self.update_dynamic_ui()
 
     def play_ball(self):
         super().play_ball()
+        self.reveal_hud(4.5)
         self.update_dynamic_ui()
 
     def dance(self, highfive=False):
         super().dance(highfive=highfive)
+        self.reveal_hud(4.5)
         self.update_dynamic_ui()
 
     def toggle_sleep(self):
         super().toggle_sleep()
-        self._rebuild_tray_menu()
+        self.reveal_hud(4.5)
+        self._refresh_menu_actions()
         self.update_dynamic_ui()
 
     def wake(self):
         super().wake()
-        self._rebuild_tray_menu()
+        self.reveal_hud(4.5)
+        self._refresh_menu_actions()
         self.update_dynamic_ui()
 
     def poke(self):
         super().poke()
+        self.reveal_hud(4.0)
         self.update_dynamic_ui()
 
+    def mousePressEvent(self, event):
+        self.reveal_hud(3.5)
+        super().mousePressEvent(event)
+
+    def wheelEvent(self, event):
+        self.reveal_hud(3.5)
+        super().wheelEvent(event)
+
+    # ---------- paint ----------
     def paintEvent(self, event):
         super().paintEvent(event)
-        if not self.ui_state.get("hud_enabled", True):
+        if not self.should_draw_hud():
             return
         colors = self.current_colors()
         mood = int(round(self.needs["mood"] * 100))
