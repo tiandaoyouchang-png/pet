@@ -3,9 +3,9 @@
 from typing import Dict, Tuple, Union
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor, QFont, QFontDatabase
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QFrame, QGraphicsDropShadowEffect, QGridLayout,
+    QButtonGroup, QDialog, QFrame, QGraphicsDropShadowEffect, QGridLayout,
     QHBoxLayout, QLabel, QProgressBar, QPushButton, QSlider, QVBoxLayout, QWidget,
 )
 
@@ -46,7 +46,7 @@ DEFAULT_UI = {
     "opacity": 0.98,
     "bubble_scale": 1.0,
     "speech_enabled": True,
-    "hud_enabled": True,
+    "hud_mode": "smart",
 }
 
 
@@ -61,10 +61,8 @@ def qcolor(color: Color) -> QColor:
 
 
 def ui_font(size=13, weight=QFont.Normal):
-    font = QFont("SF Pro Display")
-    if not font.exactMatch():
-        font = QFont("PingFang SC")
-    font.setPixelSize(size)
+    font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+    font.setPointSizeF(max(8.5, float(size) * 0.78))
     font.setWeight(weight)
     return font
 
@@ -115,10 +113,9 @@ class MetricRow(QWidget):
 
 class StatusCard(QWidget):
     def __init__(self, pet):
-        super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        super().__init__(None, Qt.Popup | Qt.FramelessWindowHint)
         self.pet = pet
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setFixedSize(326, 382)
 
         root = QVBoxLayout(self)
@@ -239,8 +236,9 @@ class PreferencesDialog(QDialog):
         super().__init__(pet)
         self.pet = pet
         self.theme_buttons = {}
+        self.hud_buttons = {}
         self.setWindowTitle("Momo 偏好设置")
-        self.setMinimumSize(520, 560)
+        self.setMinimumSize(520, 590)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(22, 20, 22, 20)
@@ -263,11 +261,14 @@ class PreferencesDialog(QDialog):
         appearance = self._group("外观")
         ap = appearance.layout()
         ap.addWidget(QLabel("主题模式"))
+        self.theme_group = QButtonGroup(self)
+        self.theme_group.setExclusive(True)
         segmented = QHBoxLayout()
-        for mode, label in (("light", "浅色"), ("dark", "深色"), ("system", "跟随系统")):
+        for idx, (mode, label) in enumerate((("light", "浅色"), ("dark", "深色"), ("system", "跟随系统"))):
             button = QPushButton(label)
             button.setCheckable(True)
             button.clicked.connect(lambda checked=False, m=mode: self.set_theme(m))
+            self.theme_group.addButton(button, idx)
             self.theme_buttons[mode] = button
             segmented.addWidget(button)
         ap.addLayout(segmented)
@@ -295,13 +296,25 @@ class PreferencesDialog(QDialog):
         self.bubble.setRange(60, 160)
         self.bubble.valueChanged.connect(self.bubble_changed)
         inter.addWidget(self.bubble)
-        self.speech = QCheckBox("显示对话气泡")
-        self.speech.stateChanged.connect(self.toggle_speech)
+
+        self.speech = QPushButton("对话气泡")
+        self.speech.setCheckable(True)
+        self.speech.clicked.connect(self.toggle_speech)
         inter.addWidget(self.speech)
-        self.hud = QCheckBox("显示心情状态胶囊")
-        self.hud.stateChanged.connect(self.toggle_hud)
-        inter.addWidget(self.hud)
-        hint = QLabel("关闭气泡不会停止 Momo 活动，只会减少视觉打扰。")
+
+        inter.addWidget(QLabel("心情状态胶囊"))
+        self.hud_group = QButtonGroup(self)
+        self.hud_group.setExclusive(True)
+        hud_segmented = QHBoxLayout()
+        for idx, (mode, label) in enumerate((("smart", "互动时"), ("always", "始终"), ("off", "关闭"))):
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.clicked.connect(lambda checked=False, m=mode: self.set_hud_mode(m))
+            self.hud_group.addButton(button, idx)
+            self.hud_buttons[mode] = button
+            hud_segmented.addWidget(button)
+        inter.addLayout(hud_segmented)
+        hint = QLabel("“互动时”会在点击、喂食、玩耍或状态变化后短暂显示，更适合长期常驻。")
         hint.setObjectName("secondary")
         hint.setWordWrap(True)
         inter.addWidget(hint)
@@ -316,12 +329,14 @@ class PreferencesDialog(QDialog):
         root.addWidget(info)
 
         buttons = QHBoxLayout()
-        buttons.addStretch(1)
         reset = QPushButton("恢复默认")
+        reset.setObjectName("secondaryButton")
         reset.clicked.connect(self.reset_defaults)
         done = QPushButton("完成")
+        done.setObjectName("primaryButton")
         done.clicked.connect(self.accept)
         buttons.addWidget(reset)
+        buttons.addStretch(1)
         buttons.addWidget(done)
         root.addLayout(buttons)
         self.sync_from_pet()
@@ -353,38 +368,50 @@ class PreferencesDialog(QDialog):
         self.bubble_value.setText("{}%".format(value))
         self.pet.apply_ui_state()
 
-    def toggle_speech(self):
-        self.pet.ui_state["speech_enabled"] = self.speech.isChecked()
+    def toggle_speech(self, checked=False):
+        self.pet.ui_state["speech_enabled"] = bool(checked)
         self.pet.apply_ui_state()
 
-    def toggle_hud(self):
-        self.pet.ui_state["hud_enabled"] = self.hud.isChecked()
+    def set_hud_mode(self, mode):
+        self.pet.ui_state["hud_mode"] = mode
         self.pet.apply_ui_state()
+        self.pet.reveal_hud(4.0)
 
     def reset_defaults(self):
         self.pet.ui_state.update(DEFAULT_UI)
         self.pet.apply_ui_state()
         self.sync_from_pet()
         self.pet.bubble.show("已恢复默认设置～", 2.0)
+        self.pet.reveal_hud(4.0)
 
     def sync_from_pet(self):
         self.avatar.setPixmap(self.pet.make_avatar_pixmap(84, 98).scaled(
             64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         opacity = int(round(self.pet.ui_state["opacity"] * 100))
         bubble = int(round(self.pet.ui_state["bubble_scale"] * 100))
+        self.opacity.blockSignals(True)
         self.opacity.setValue(opacity)
+        self.opacity.blockSignals(False)
         self.opacity_value.setText("{}%".format(opacity))
+        self.bubble.blockSignals(True)
         self.bubble.setValue(bubble)
+        self.bubble.blockSignals(False)
         self.bubble_value.setText("{}%".format(bubble))
+        self.speech.blockSignals(True)
         self.speech.setChecked(bool(self.pet.ui_state["speech_enabled"]))
-        self.hud.setChecked(bool(self.pet.ui_state["hud_enabled"]))
+        self.speech.blockSignals(False)
         mode = self.pet.ui_state["theme_mode"]
         for key, button in self.theme_buttons.items():
             button.setChecked(key == mode)
+        hud_mode = self.pet.ui_state.get("hud_mode", "smart")
+        for key, button in self.hud_buttons.items():
+            button.setChecked(key == hud_mode)
         theme_names = {"light": "浅色", "dark": "深色", "system": "跟随系统"}
-        self.info.setText("当前：{} · 主题 {}（生效：{}） · {}".format(
+        hud_names = {"smart": "互动时显示", "always": "始终显示", "off": "关闭"}
+        self.info.setText("当前：{} · 主题 {}（生效：{}） · HUD {} · {}".format(
             MODE_LABELS.get(self.pet.character.mode, "陪伴中"), theme_names.get(mode, "跟随系统"),
-            self.pet.effective_theme_name(), "桌宠已隐藏" if self.pet.pet_hidden else "桌宠显示中"))
+            self.pet.effective_theme_name(), hud_names.get(hud_mode, "互动时显示"),
+            "桌宠已隐藏" if self.pet.pet_hidden else "桌宠显示中"))
         self.apply_theme()
 
     def apply_theme(self):
@@ -394,16 +421,18 @@ class PreferencesDialog(QDialog):
             QFrame#group {{ background:{}; border:1px solid {}; border-radius:16px; }}
             QLabel {{ color:{}; background:transparent; }}
             QLabel#secondary {{ color:{}; }}
-            QCheckBox {{ color:{}; spacing:8px; }}
             QSlider::groove:horizontal {{ height:4px; background:{}; border-radius:2px; }}
             QSlider::sub-page:horizontal {{ background:{}; border-radius:2px; }}
             QSlider::handle:horizontal {{ width:16px; margin:-6px 0; background:{}; border:1px solid {}; border-radius:8px; }}
             QPushButton {{ background:{}; color:{}; border:1px solid {}; border-radius:10px; padding:8px 14px; }}
             QPushButton:hover {{ background:{}; }}
             QPushButton:checked {{ background:{}; border:1px solid {}; }}
+            QPushButton#primaryButton {{ background:{}; color:white; border:1px solid {}; }}
+            QPushButton#secondaryButton {{ background:transparent; color:{}; }}
         """.format(
             css(colors["floating"]), css(colors["text"]), css(colors["surface"]), css(colors["border"]),
-            css(colors["text"]), css(colors["secondary"]), css(colors["text"]), css(colors["track"]),
+            css(colors["text"]), css(colors["secondary"]), css(colors["track"]),
             css(colors["accent"]), css(colors["surface_strong"]), css(colors["border"]),
             css(colors["surface_soft"]), css(colors["text"]), css(colors["border"]),
-            css(colors["surface_strong"]), css(colors["accent_soft"]), css(colors["accent"])))
+            css(colors["surface_strong"]), css(colors["accent_soft"]), css(colors["accent"]),
+            css(colors["accent"]), css(colors["accent"]), css(colors["secondary"])))
