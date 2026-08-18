@@ -2,7 +2,7 @@
 
 一个轻量、低打扰的 macOS 桌面宠物。Momo 会自己溜达、发呆、打盹、跳舞、要吃的，也会追着你的鼠标看。
 
-当前 `ui/apple-polish` 版本保留原来的鸡蛋形象与 60 FPS 动画核心，同时加入了更完整的 Apple/macOS 风格 UI。
+当前 `ui/apple-polish` 版本保留原来的鸡蛋形象与 60 FPS 动画核心，同时加入更接近 macOS 原生习惯的菜单栏、状态卡、主题与偏好设置体验。
 
 ![Momo](docs/preview.png)
 
@@ -19,16 +19,18 @@ python3 -m venv .venv
 ./.venv/bin/python momo_app.py
 ```
 
-## 现在有哪些 UI 改进
+## Apple UI 版本
 
-- 更轻的半透明对话气泡
-- 头顶心情 HUD 胶囊
-- Apple 风格右键 / 菜单栏菜单
-- 点击菜单栏图标打开状态卡
+- 半透明对话气泡，支持浅色 / 深色 / 跟随系统
+- macOS 菜单栏使用单色鸡蛋 mask 图标，自动适配明暗菜单栏
+- 菜单栏菜单尽量交给 macOS 原生样式，不强行套 Qt 皮肤
+- 点击菜单栏图标打开状态 Popover，再次点击可收起，点击外部自动关闭
 - 状态卡显示心情、饱食、精力和当前行为
 - 喂食、玩耍、跳舞、睡觉快捷操作
 - 显示 / 隐藏 Momo、召回到当前屏幕
-- 偏好设置：浅色 / 深色 / 跟随系统、透明度、气泡时长、气泡开关、HUD 开关
+- 心情 HUD 支持“互动时 / 始终 / 关闭”，默认低打扰的“互动时”
+- 偏好设置：浅色 / 深色 / 跟随系统、透明度、气泡时长、气泡开关、HUD 模式
+- 系统明暗模式变化时，跟随系统主题会自动刷新
 - UI 配置会与需求状态一起保存到 `~/.momo_pet.json`
 
 ## 怎么和 Momo 玩
@@ -42,7 +44,7 @@ python3 -m venv .venv
 | 鼠标悬停 | 它会盯着光标看，看久了会挥手 |
 | 滚轮 | 挠痒痒 |
 | 右键 Momo | 打开完整快捷菜单 |
-| 点击菜单栏图标 | 打开 Momo 状态卡 |
+| 点击菜单栏图标 | 打开 / 收起 Momo 状态卡 |
 
 ## 自主行为
 
@@ -57,14 +59,14 @@ Momo 有四个需求：**饱腹、精力、亲密度、心情**，会随时间�
 ## 文件说明
 
 ```text
-pixar_pet.py                角色动画、行为、需求系统与原生置顶逻辑
-momo_app.py                 Apple 风格 App / 菜单 / HUD 协调层
-momo_ui.py                  状态卡、偏好设置、主题 token 等 UI 组件
-requirements.txt            依赖
-start.command               macOS 双击启动入口
-tools/render_actual_preview.py  使用 Qt widget.grab() 生成真实 UI 预览
-make_preview.py             角色状态预览辅助脚本
-docs/preview.png            角色预览图
+pixar_pet.py                   角色动画、行为、需求系统与原生置顶逻辑
+momo_app.py                    App、菜单栏、Popover、HUD、主题协调层
+momo_ui.py                     状态卡、偏好设置、主题 token 与通用 UI 组件
+requirements.txt               依赖
+start.command                  macOS 双击启动入口
+tools/render_actual_preview.py 通过 Qt widget.grab() 生成真实 UI 预览
+make_preview.py                角色状态预览辅助脚本
+docs/preview.png               角色预览图
 ```
 
 ## 常见问题
@@ -82,4 +84,6 @@ docs/preview.png            角色预览图
 - 60 FPS 角色动画
 - UI 与角色行为分层：`pixar_pet.py` 保持核心稳定，UI 由 `momo_app.py` + `momo_ui.py` 扩展
 - Qt `WindowStaysOnTopHint` + macOS AppKit 原生窗口层级
+- 系统字体与动态 Color Scheme 适配
 - 状态与 UI 偏好持久化
+- GitHub Actions 可生成当前代码的真实 Qt UI 截图，避免把概念图当运行态
